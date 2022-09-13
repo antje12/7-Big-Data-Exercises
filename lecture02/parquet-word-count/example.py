@@ -14,3 +14,18 @@ with client.read('/alice-in-wonderland.txt', encoding='utf-8') as reader:
 
     
 # To-Do: Save the wordcount in a Parquet file and read it again!
+dataFrame = pd.DataFrame(wordcount)
+
+schema = pa.Schema.from_pandas(dataFrame)
+
+table = pa.Table.from_pandas(dataFrame)
+
+pq.write_table(table, '/word-count.parquet')
+
+resultTable = pq.read_pandas('/word-count.parquet').to_pandas()
+
+client.upload('/word-count.parquet', '/word-count.parquet', overwrite=True)
+
+print(schema)
+print('\n')
+print(resultTable)
