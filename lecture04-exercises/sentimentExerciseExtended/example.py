@@ -1,6 +1,6 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType
-from pyspark.sql.functions import explode, split, to_json, array, col
+from pyspark.sql.types import StructType, StringType
+from pyspark.sql.functions import explode, split, to_json, array, col, udf
 import locale
 locale.getdefaultlocale()
 locale.getpreferredencoding()
@@ -31,4 +31,39 @@ sentences = df.selectExpr("CAST(value AS STRING)")
 
 # TODO!
 # Count the sentiment of each word
+def scoreWord(word):
+  if word in positiveWords:
+    return 1
+  if word in negativeWords:
+    return -1
+  return 0
+
+udf_scoreWord = udf(scoreWord, StringType())
+
+# Split the sentences into words
+# Note "explode" and "split" are SQL functions in Spark, not Python!
+words = sentences.select(
+   explode(
+       split(sentences.value, " ")
+   ).alias("word")
+)
+
+# Generate running word count & score by using SQL
+wordCounts = words.groupBy("word").count().sort(col('count'))
+
+wordScores = wordCounts.withColumn("score", col('count') * udf_scoreWord(col('word')))
+
+# Add a new column to our Dataframe, where the column name is "value" and the content is "(word, count)" as an SQL array
+columns = [col('word'), col('score')]
+mergedColumns = wordScores.withColumn('value', array(columns))
+
 # Write it back to Kafka
+# Select the "mergedColumns.value" column, and convert to JSON with the alias "value", cast it to a string
+# The "value" column is required by Kafka!
+# Then create a Kafka write stream, with the output mode "complete"
+mergedColumns.select(to_json(mergedColumns.value).alias('value')).selectExpr("CAST(value AS STRING)").writeStream \
+    .format('kafka') \
+    .option("kafka.bootstrap.servers", "kafka:9092") \
+    .option("topic", "sentiment-score") \
+    .outputMode("complete") \
+    .start().awaitTermination()
